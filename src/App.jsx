@@ -7,9 +7,10 @@ const App = () => {
   const [preprocessedImage, setPreprocessedImage] = useState(null);
   const [isPreprocessing, setIsPreprocessing] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
-  const [downloadLink, setDownloadLink] = useState(null);
-  const [fileContent, setFileContent] = useState(null);
+  const [continuousSessionId, setContinuousSessionId] = useState(null);
+  const [currentTranslation, setCurrentTranslation] = useState(null);
+  const [mergedTranslation, setMergedTranslation] = useState(null);
+  const [imageCount, setImageCount] = useState(0);
   const [scale, setScale] = useState(30);
   const [noiseDiv, setNoiseDiv] = useState(0.9);
 
@@ -17,9 +18,7 @@ const App = () => {
     const file = event.target.files[0];
     setSelectedFile(file);
     setPreprocessedImage(null);
-    setSessionId(null);
-    setDownloadLink(null);
-    setFileContent(null);
+    setCurrentTranslation(null);
 
     if (file) {
       const url = URL.createObjectURL(file);
@@ -29,15 +28,30 @@ const App = () => {
     }
   };
 
+  const startNewSession = async () => {
+    try {
+      const response = await axios.post(
+        "http://localhost:8000/start-continuous/"
+      );
+      setContinuousSessionId(response.data.session_id);
+      setImageCount(0);
+      setMergedTranslation(null);
+    } catch (error) {
+      console.error("Error starting new session:", error);
+      alert("Failed to start new translation session");
+    }
+  };
+
   const handlePreprocess = async () => {
     if (!selectedFile) {
       alert("Please select a file first.");
       return;
     }
-    setPreprocessedImage(null);
-    setSessionId(null);
-    setDownloadLink(null);
-    setFileContent(null);
+
+    if (!continuousSessionId) {
+      await startNewSession();
+    }
+
     setIsPreprocessing(true);
 
     const formData = new FormData();
@@ -50,13 +64,11 @@ const App = () => {
         "http://localhost:8000/preprocess/",
         formData
       );
-
-      setSessionId(response.data.session_id);
       setPreprocessedImage(
         `data:image/png;base64,${response.data.preprocessed_image}`
       );
     } catch (error) {
-      console.log("Error preprocessing file:", error);
+      console.error("Error preprocessing file:", error);
       alert("An error occurred while preprocessing the file.");
     } finally {
       setIsPreprocessing(false);
@@ -64,7 +76,7 @@ const App = () => {
   };
 
   const handleTranslate = async () => {
-    if (!sessionId) {
+    if (!preprocessedImage) {
       alert("Please preprocess the image first.");
       return;
     }
@@ -72,27 +84,64 @@ const App = () => {
     setIsTranslating(true);
 
     try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("scale", scale);
+      formData.append("noise_divisor", noiseDiv);
+
       const response = await axios.post(
-        `http://localhost:8000/translate/${sessionId}`,
-        {},
-        {
-          responseType: "blob",
-        }
+        `http://localhost:8000/continuous-translate/${continuousSessionId}`,
+        formData
       );
 
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      setDownloadLink(url);
+      setCurrentTranslation(response.data.current_translation);
+      setMergedTranslation(response.data.merged_translation);
+      setImageCount(response.data.num_images);
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        setFileContent(reader.result);
-      };
-      reader.readAsText(response.data);
+      // Clear file selection for next image
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      setPreprocessedImage(null);
     } catch (error) {
-      console.log("Error translating file:", error);
+      console.error("Error translating file:", error);
       alert("An error occurred while translating the file.");
     } finally {
       setIsTranslating(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!continuousSessionId) {
+      alert("No active translation session.");
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `http://localhost:8000/complete-session/${continuousSessionId}`,
+        {},
+        { responseType: "blob" }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "final_translation.txt");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      // Reset state
+      setContinuousSessionId(null);
+      setImageCount(0);
+      setMergedTranslation(null);
+      setCurrentTranslation(null);
+      setPreprocessedImage(null);
+      setSelectedFile(null);
+      setPreviewUrl(null);
+    } catch (error) {
+      console.error("Error completing session:", error);
+      alert("Failed to complete translation session");
     }
   };
 
@@ -104,6 +153,13 @@ const App = () => {
         </h1>
 
         <div className="space-y-6">
+          {/* Session Status */}
+          {continuousSessionId && (
+            <div className="text-sm text-gray-600 text-center">
+              Active Session: {imageCount} image(s) processed
+            </div>
+          )}
+
           {/* File Upload Section */}
           <div className="space-y-4">
             <label className="block text-sm text-center font-medium text-gray-700">
@@ -173,7 +229,7 @@ const App = () => {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-4">
             <button
               onClick={handlePreprocess}
               disabled={isPreprocessing || !selectedFile}
@@ -188,37 +244,45 @@ const App = () => {
 
             <button
               onClick={handleTranslate}
-              disabled={isTranslating || !sessionId}
+              disabled={isTranslating || !preprocessedImage}
               className={`flex-1 py-2 px-4 text-white rounded-lg ${
-                isTranslating || !sessionId
+                isTranslating || !preprocessedImage
                   ? "bg-green-300"
                   : "bg-green-600 hover:bg-green-700"
               }`}
             >
               {isTranslating ? "Translating..." : "Translate"}
             </button>
+
+            {continuousSessionId && (
+              <button
+                onClick={handleComplete}
+                className="flex-1 py-2 px-4 text-white rounded-lg bg-purple-600 hover:bg-purple-700"
+              >
+                Complete & Download
+              </button>
+            )}
           </div>
 
           {/* Results Section */}
-          {downloadLink && (
-            <div className="text-center">
-              <a
-                href={downloadLink}
-                download="translation.txt"
-                className="text-blue-600 underline hover:text-blue-800"
-              >
-                Download Translation
-              </a>
+          {currentTranslation && (
+            <div className="p-4 bg-gray-100 rounded border border-gray-300">
+              <h2 className="text-lg font-bold mb-2">
+                Current Image Translation:
+              </h2>
+              <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words">
+                {currentTranslation.join("\n")}
+              </pre>
             </div>
           )}
 
-          {fileContent && (
+          {mergedTranslation && (
             <div className="p-4 bg-gray-100 rounded border border-gray-300">
               <h2 className="text-lg font-bold mb-2">
-                Transliterated text in modern Tamil:
+                Merged Translation (All Images):
               </h2>
               <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words">
-                {fileContent}
+                {mergedTranslation.join("\n")}
               </pre>
             </div>
           )}
