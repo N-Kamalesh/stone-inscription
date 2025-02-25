@@ -11,7 +11,6 @@ const App = () => {
   const [currentTranslation, setCurrentTranslation] = useState(null);
   const [mergedTranslation, setMergedTranslation] = useState(null);
   const [imageCount, setImageCount] = useState(0);
-  const [scale, setScale] = useState(30);
   const [noiseDiv, setNoiseDiv] = useState(0.9);
 
   const handleFileChange = (event) => {
@@ -56,7 +55,8 @@ const App = () => {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
-    formData.append("scale", scale);
+    // Use default scale value (30) - removed from frontend
+    formData.append("scale", 30);
     formData.append("noise_divisor", noiseDiv);
 
     try {
@@ -86,7 +86,8 @@ const App = () => {
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
-      formData.append("scale", scale);
+      // Use default scale value (30) - removed from frontend
+      formData.append("scale", 30);
       formData.append("noise_divisor", noiseDiv);
 
       const response = await axios.post(
@@ -174,20 +175,7 @@ const App = () => {
           </div>
 
           {/* Parameter Controls */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Image Size Scale ({scale}%)
-              </label>
-              <input
-                type="range"
-                min="10"
-                max="100"
-                value={scale}
-                onChange={(e) => setScale(Number(e.target.value))}
-                className="w-full"
-              />
-            </div>
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Noise Divisor ({noiseDiv})
